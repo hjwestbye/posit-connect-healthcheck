@@ -14,24 +14,26 @@ execute:
 library(DBI)
 library(RPostgres)
 
-db_url <- Sys.getenv("FINANCE_DB_URL", unset = "")
+db_url <- "postgresql://postgres:slippmeginn@db.wtkzwwhvwdtsusourfjh.supabase.co:5432/postgres"
 if (db_url == "") stop("FINANCE_DB_URL is not set")
 
-# Connect
-con <- dbConnect(RPostgres::Postgres(), dbname = db_url)
-on.exit(try(dbDisconnect(con), silent = TRUE), add = TRUE)
+`%||%` <- function(x, y) if (is.null(x) || identical(x, "")) y else x
 
-# Create schema/table (idempotent)
-DBI::dbExecute(con, "CREATE SCHEMA IF NOT EXISTS core;")
+parts <- DBI::dbParseURL(db_url)
+sslmode <- parts$sslmode %||% "require"
 
-DBI::dbExecute(con, "
-  CREATE TABLE IF NOT EXISTS core.runs_healthcheck (
-    id BIGSERIAL PRIMARY KEY,
-    ts_utc TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    who TEXT,
-    note TEXT
-  );
-")
+con <- DBI::dbConnect(
+  RPostgres::Postgres(),
+  dbname   = parts$dbname,
+  host     = parts$host,
+  port     = parts$port %||% 5432,
+  user     = parts$user,
+  password = parts$password,
+  sslmode  = sslmode
+)
+
+on.exit(try(DBI::dbDisconnect(con), silent = TRUE), add = TRUE)
+
 
 # Insert a row
 DBI::dbExecute(con, "
