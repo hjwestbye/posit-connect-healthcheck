@@ -13,168 +13,53 @@ execute:
 library(DBI)
 library(RPostgres)
 
-# -------------------------
-# Minimal YAML reader for your config shape
-# (supports: pg: {host, port, dbname, user, sslmode, password(optional)})
-# -------------------------
-read_pg_config <- function(path = "config.yaml") {
-  if (!file.exists(path)) stop(sprintf("Missing %s in repo root.", path))
-  lines <- readLines(path, warn = FALSE)
-
-  # drop comments and blank lines
-  lines <- trimws(lines)
-  lines <- lines[nzchar(lines)]
-  lines <- lines[!startsWith(lines, "#")]
-
-  # ensure we are inside pg:
-  if (!any(grepl("^pg\\s*:\\s*$", lines))) stop("config.yaml must contain a top-level `pg:` block")
-
-  in_pg <- FALSE
-  kv <- list()
-
-  for (ln in lines) {
-    if (grepl("^pg\\s*:\\s*$", ln)) {
-      in_pg <- TRUE
-      next
-    }
-
-    # stop if we hit another top-level key
-    if (in_pg && grepl("^[A-Za-z0-9_]+\\s*:\\s*$", ln) && !grepl("^pg\\s*:", ln)) {
-      break
-    }
-
-    if (!in_pg) next
-
-    # parse "key: value"
-    m <- regexec("^([A-Za-z0-9_]+)\\s*:\\s*(.*)$", ln)
-    mm <- regmatches(ln, m)[[1]]
-    if (length(mm) != 3) next
-
-    key <- mm[2]
-    val <- mm[3]
-
-    # strip quotes if present
-    val <- sub('^"(.*)"$', "\\1", val)
-    val <- sub("^'(.*)'$", "\\1", val)
-
-    kv[[key]] <- val
-  }
-
-  # normalize / validate
-  get <- function(k) if (!is.null(kv[[k]]) && nzchar(kv[[k]])) kv[[k]] else NULL
-
-  host <- get("host")
-  port <- get("port")
-  db   <- get("dbname")
-  user <- get("user")
-  ssl  <- get("sslmode")
-  pass <- get("password")  # optional; not recommended to commit
-
-  if (is.null(host)) stop("config.yaml pg.host is missing")
-  if (is.null(db))   stop("config.yaml pg.dbname is missing")
-  if (is.null(user)) stop("config.yaml pg.user is missing")
-
-  port_i <- suppressWarnings(as.integer(port))
-  if (is.na(port_i)) port_i <- 5432
-
-  list(
-    host = host,
-    port = port_i,
-    dbname = db,
-    user = user,
-    sslmode = if (is.null(ssl)) "require" else ssl,
-    password = "slippmeginn"
-  )
-}
-
-need_env <- function(name) {
-  v <- Sys.getenv(name, unset = "")
-  if (!nzchar(v)) stop(sprintf("Missing env var: %s", name))
-  v
-}
-
-safe_exec <- function(con, sql, params = NULL) {
-  tryCatch({
-    if (is.null(params)) DBI::dbExecute(con, sql) else DBI::dbExecute(con, sql, params = params)
-  }, error = function(e) {
-    stop(paste0("DB error for SQL:\n", sql, "\n\n", conditionMessage(e)))
-  })
-}
-safe_query <- function(con, sql) {
-  tryCatch(DBI::dbGetQuery(con, sql), error = function(e) {
-    stop(paste0("DB error for query:\n", sql, "\n\n", conditionMessage(e)))
-  })
-}
-
-# -------------------------
-# Load config.yaml
-# -------------------------
-pg <- read_pg_config("config.yaml")
-
-# Password: prefer env var (recommended)
-pwd <- Sys.getenv("PGPASSWORD", unset = "")
-if (!nzchar(pwd)) {
-  # fallback to config.yaml if you added pg.password (NOT recommended)
-  if (!is.null(pg$password) && nzchar(pg$password)) {
-    pwd <- pg$password
-  } else {
-    stop("No password found. Set PGPASSWORD env var (recommended) or add pg.password to config.yaml (not recommended).")
-  }
-}
-
-cat("Attempting Postgres connection:\n")
-cat(sprintf(
-  "  host: %s\n  port: %s\n  db:   %s\n  user: %s\n  ssl:  %s\n\n",
-  pg$host, pg$port, pg$dbname, pg$user, pg$sslmode
-))
-
-# -------------------------
-# Connect
-# -------------------------
+# =========================
+# Supabase connection (DIRECT)
+# =========================
 con <- DBI::dbConnect(
   RPostgres::Postgres(),
-  host     = pg$host,
-  port     = pg$port,
-  dbname   = pg$dbname,
-  user     = pg$user,
-  password = pwd,
-  sslmode  = pg$sslmode
+  host     = "db.wtkzwwhvwdtsusourfjh.supabase.co",
+  port     = 5432,
+  dbname   = "postgres",
+  user     = "postgres",
+  password = "slippmeginn",
+  sslmode  = "require"
 )
+
 on.exit(try(DBI::dbDisconnect(con), silent = TRUE), add = TRUE)
 
-cat("Connected OK.\n\n")
+cat("Connected OK\n")
 
-# Sanity query
-print(safe_query(con, "SELECT now() AS server_time, current_user AS db_user;"))
-cat("\n")
+# =========================
+# Minimal sanity checks
+# =========================
+print(DBI::dbGetQuery(
+  con,
+  "SELECT
+     1        AS ok,
+     now()    AS server_time,
+     current_user AS db_user,
+     inet_server_addr() AS server_addr;"
+))
 
-# DDL + write/read
-safe_exec(con, "CREATE SCHEMA IF NOT EXISTS core;")
-
-safe_exec(con, "
-  CREATE TABLE IF NOT EXISTS core.runs_healthcheck (
+# =========================
+# Minimal write/read test
+# =========================
+DBI::dbExecute(con, "
+  CREATE TABLE IF NOT EXISTS public.healthcheck (
     id BIGSERIAL PRIMARY KEY,
-    ts_utc TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    who TEXT NOT NULL,
-    note TEXT
+    ts TIMESTAMPTZ NOT NULL DEFAULT now()
   );
 ")
 
-safe_exec(
-  con,
-  "INSERT INTO core.runs_healthcheck (who, note) VALUES ($1, $2);",
-  params = list("connect_cloud", "db_healthcheck.qmd")
-)
+DBI::dbExecute(con, "INSERT INTO public.healthcheck DEFAULT VALUES;")
 
-rows <- safe_query(con, "
-  SELECT id, ts_utc, who, note
-  FROM core.runs_healthcheck
+print(DBI::dbGetQuery(con, "
+  SELECT *
+  FROM public.healthcheck
   ORDER BY id DESC
   LIMIT 5;
-")
-
-cat("Wrote a row. Latest rows:\n\n")
-print(rows)
+"))
 
 
 ```

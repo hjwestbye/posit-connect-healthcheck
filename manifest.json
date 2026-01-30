@@ -1235,11 +1235,14 @@
     ".Rprofile": {
       "checksum": "81051bcc2cf1bedf378224b0a93e2877"
     },
+    "config.yaml": {
+      "checksum": "c0b48bb41f99df820699911c17f496c1"
+    },
     "config.yml": {
-      "checksum": "e308966eadc4e314fae713bb33b94c45"
+      "checksum": "c0b48bb41f99df820699911c17f496c1"
     },
     "db_healthcheck.qmd": {
-      "checksum": "22463f33080d21fec3a7c30132178cb2"
+      "checksum": "d771580d30897b28fe26135f2667c1ab"
     },
     "deps.R": {
       "checksum": "461a581feba01e61dae589ca4e7a33d4"
