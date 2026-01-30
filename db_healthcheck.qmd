@@ -10,48 +10,53 @@ execute:
 
 
 ```{r}
-# ---- helpers ----
+library(DBI)
+library(RPostgres)
+
 need_env <- function(name) {
   v <- Sys.getenv(name, unset = "")
   if (!nzchar(v)) stop(sprintf("Missing env var: %s", name))
   v
 }
 
-need_cfg <- function(x, path) {
-  if (is.null(x) || !nzchar(as.character(x))) stop(sprintf("Missing config value: %s", path))
-  x
+env_int <- function(name, default) {
+  v <- Sys.getenv(name, unset = "")
+  if (!nzchar(v)) return(default)
+  suppressWarnings(as.integer(v))
 }
 
-# ---- packages ----
-library(DBI)
-library(RPostgres)
-library(yaml)
-
-# ---- load config.yml (non-secret) ----
-if (!file.exists("config.yml")) {
-  stop("Missing config.yml in repo root. Create it and republish.")
+env_str <- function(name, default) {
+  v <- Sys.getenv(name, unset = "")
+  if (!nzchar(v)) return(default)
+  v
 }
 
-cfg <- yaml::read_yaml("config.yml")
+safe_exec <- function(con, sql, params = NULL) {
+  tryCatch({
+    if (is.null(params)) DBI::dbExecute(con, sql) else DBI::dbExecute(con, sql, params = params)
+  }, error = function(e) {
+    stop(paste0("DB error for SQL:\n", sql, "\n\n", conditionMessage(e)))
+  })
+}
 
-pg <- cfg$pg
-host <- need_cfg(pg$host, "pg.host")
-port <- as.integer(pg$port %||% 5432)
-db   <- need_cfg(pg$dbname, "pg.dbname")
-usr  <- need_cfg(pg$user, "pg.user")
-ssl  <- pg$sslmode %||% "require"
+safe_query <- function(con, sql) {
+  tryCatch({
+    DBI::dbGetQuery(con, sql)
+  }, error = function(e) {
+    stop(paste0("DB error for query:\n", sql, "\n\n", conditionMessage(e)))
+  })
+}
 
-# Password comes from env var (secret)
-pwd <- "slippmeginn"
-
-# minimal %||% helper
-`%||%` <- function(x, y) if (is.null(x) || identical(x, "")) y else x
+host <- need_env("PGHOST")
+port <- env_int("PGPORT", 5432)
+db   <- need_env("PGDATABASE")
+usr  <- need_env("PGUSER")
+pwd  <- need_env("PGPASSWORD")
+ssl  <- env_str("PGSSLMODE", "require")
 
 cat("Attempting Postgres connection:\n")
-cat(sprintf("  host: %s\n  port: %s\n  db:   %s\n  user: %s\n  ssl:  %s\n\n",
-            host, port, db, usr, ssl))
+cat(sprintf("  host: %s\n  port: %s\n  db:   %s\n  user: %s\n  ssl:  %s\n\n", host, port, db, usr, ssl))
 
-# ---- connect ----
 con <- DBI::dbConnect(
   RPostgres::Postgres(),
   host     = host,
@@ -65,10 +70,14 @@ on.exit(try(DBI::dbDisconnect(con), silent = TRUE), add = TRUE)
 
 cat("Connected OK.\n\n")
 
-# ---- init schema/table (idempotent) ----
-DBI::dbExecute(con, "CREATE SCHEMA IF NOT EXISTS core;")
+# Quick sanity query (forces a roundtrip)
+print(safe_query(con, "SELECT 1 AS ok;"))
+cat("\n")
 
-DBI::dbExecute(con, "
+# DDL + write/read
+safe_exec(con, "CREATE SCHEMA IF NOT EXISTS core;")
+
+safe_exec(con, "
   CREATE TABLE IF NOT EXISTS core.runs_healthcheck (
     id BIGSERIAL PRIMARY KEY,
     ts_utc TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -77,15 +86,13 @@ DBI::dbExecute(con, "
   );
 ")
 
-# ---- write a row ----
-DBI::dbExecute(
+safe_exec(
   con,
   "INSERT INTO core.runs_healthcheck (who, note) VALUES ($1, $2);",
   params = list("connect_cloud", "db_healthcheck.qmd")
 )
 
-# ---- read back ----
-rows <- DBI::dbGetQuery(con, "
+rows <- safe_query(con, "
   SELECT id, ts_utc, who, note
   FROM core.runs_healthcheck
   ORDER BY id DESC
@@ -94,6 +101,7 @@ rows <- DBI::dbGetQuery(con, "
 
 cat("Wrote a row. Latest rows:\n\n")
 print(rows)
+
 
 ```
 
