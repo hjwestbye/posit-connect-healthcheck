@@ -1,0 +1,55 @@
+---
+title: "DB Healthcheck (Postgres)"
+format: html
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+
+
+```{r}
+# Packages
+library(DBI)
+library(RPostgres)
+
+db_url <- Sys.getenv("FINANCE_DB_URL", unset = "")
+if (db_url == "") stop("FINANCE_DB_URL is not set")
+
+# Connect
+con <- dbConnect(RPostgres::Postgres(), dbname = db_url)
+on.exit(try(dbDisconnect(con), silent = TRUE), add = TRUE)
+
+# Create schema/table (idempotent)
+DBI::dbExecute(con, "CREATE SCHEMA IF NOT EXISTS core;")
+
+DBI::dbExecute(con, "
+  CREATE TABLE IF NOT EXISTS core.runs_healthcheck (
+    id BIGSERIAL PRIMARY KEY,
+    ts_utc TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    who TEXT,
+    note TEXT
+  );
+")
+
+# Insert a row
+DBI::dbExecute(con, "
+  INSERT INTO core.runs_healthcheck (who, note)
+  VALUES ($1, $2);
+", params = list("connect_cloud", "db_healthcheck.qmd"))
+
+# Read last 5 rows
+rows <- DBI::dbGetQuery(con, "
+  SELECT id, ts_utc, who, note
+  FROM core.runs_healthcheck
+  ORDER BY id DESC
+  LIMIT 5;
+")
+
+cat("Connected and wrote a row successfully.\n\n")
+print(rows)
+
+```
+
+

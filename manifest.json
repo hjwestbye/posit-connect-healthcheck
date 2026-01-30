@@ -4,7 +4,7 @@
   "platform": "4.5.0",
   "metadata": {
     "appmode": "quarto-static",
-    "primary_rmd": "healthcheck.qmd",
+    "primary_rmd": "db_healthcheck.qmd",
     "primary_html": null,
     "content_category": null,
     "has_parameters": false
@@ -946,7 +946,10 @@
   },
   "files": {
     ".Rprofile": {
-      "checksum": "4f6603fb4dbf71827e9004496857ad91"
+      "checksum": "b91010ac212bca5961665db79980ed41"
+    },
+    "db_healthcheck.qmd": {
+      "checksum": "1fac93e5da80221ee7932e6aa4cec489"
     },
     "healthcheck.qmd": {
       "checksum": "793779f25c1911ec9849d9e6978dcdaa"
