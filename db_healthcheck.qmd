@@ -10,81 +10,81 @@ execute:
 
 
 ```{r}
-# Packages
-library(DBI)
-library(RPostgres)
-
-db_url <- "postgresql://postgres:slippmeginn@db.wtkzwwhvwdtsusourfjh.supabase.co:5432/postgres"
-if (db_url == "") stop("FINANCE_DB_URL is not set")
-
-# Minimal postgres URL parser:
-# postgres://user:pass@host:5432/dbname?sslmode=require
-parse_pg_url <- function(url) {
-  # split query string
-  parts <- strsplit(url, "\\?", fixed = FALSE)[[1]]
-  base <- parts[1]
-  query <- if (length(parts) > 1) parts[2] else ""
-
-  # remove scheme
-  base <- sub("^postgresql?://", "", base)
-
-  # userinfo + host/db
-  at_split <- strsplit(base, "@", fixed = TRUE)[[1]]
-  if (length(at_split) != 2) stop("FINANCE_DB_URL must include userinfo@host, e.g. postgres://user:pass@host:5432/db")
-
-  userinfo <- at_split[1]
-  hostpart <- at_split[2]
-
-  # user:pass
-  up <- strsplit(userinfo, ":", fixed = TRUE)[[1]]
-  user <- up[1]
-  password <- if (length(up) >= 2) up[2] else ""
-
-  # host:port/dbname
-  hp_db <- strsplit(hostpart, "/", fixed = TRUE)[[1]]
-  if (length(hp_db) < 2) stop("FINANCE_DB_URL must include /dbname")
-  hostport <- hp_db[1]
-  dbname <- hp_db[2]
-
-  hp <- strsplit(hostport, ":", fixed = TRUE)[[1]]
-  host <- hp[1]
-  port <- if (length(hp) >= 2 && nzchar(hp[2])) as.integer(hp[2]) else 5432
-
-  # query params (only sslmode needed for now)
-  sslmode <- "require"
-  if (nzchar(query)) {
-    kvs <- strsplit(query, "&", fixed = TRUE)[[1]]
-    for (kv in kvs) {
-      kvp <- strsplit(kv, "=", fixed = TRUE)[[1]]
-      if (length(kvp) == 2 && kvp[1] == "sslmode") sslmode <- kvp[2]
-    }
-  }
-
-  list(host = host, port = port, dbname = dbname, user = user, password = password, sslmode = sslmode)
+# ---- helpers ----
+need_env <- function(name) {
+  v <- Sys.getenv(name, unset = "")
+  if (!nzchar(v)) stop(sprintf("Missing env var: %s", name))
+  v
 }
 
-p <- parse_pg_url(db_url)
+need_cfg <- function(x, path) {
+  if (is.null(x) || !nzchar(as.character(x))) stop(sprintf("Missing config value: %s", path))
+  x
+}
 
+# ---- packages ----
+library(DBI)
+library(RPostgres)
+library(yaml)
+
+# ---- load config.yml (non-secret) ----
+if (!file.exists("config.yml")) {
+  stop("Missing config.yml in repo root. Create it and republish.")
+}
+
+cfg <- yaml::read_yaml("config.yml")
+
+pg <- cfg$pg
+host <- need_cfg(pg$host, "pg.host")
+port <- as.integer(pg$port %||% 5432)
+db   <- need_cfg(pg$dbname, "pg.dbname")
+usr  <- need_cfg(pg$user, "pg.user")
+ssl  <- pg$sslmode %||% "require"
+
+# Password comes from env var (secret)
+pwd <- "slippmeginn"
+
+# minimal %||% helper
+`%||%` <- function(x, y) if (is.null(x) || identical(x, "")) y else x
+
+cat("Attempting Postgres connection:\n")
+cat(sprintf("  host: %s\n  port: %s\n  db:   %s\n  user: %s\n  ssl:  %s\n\n",
+            host, port, db, usr, ssl))
+
+# ---- connect ----
 con <- DBI::dbConnect(
   RPostgres::Postgres(),
-  dbname   = parts$dbname,
-  host     = parts$host,
-  port     = parts$port %||% 5432,
-  user     = parts$user,
-  password = parts$password,
-  sslmode  = sslmode
+  host     = host,
+  port     = port,
+  dbname   = db,
+  user     = usr,
+  password = pwd,
+  sslmode  = ssl
 )
-
 on.exit(try(DBI::dbDisconnect(con), silent = TRUE), add = TRUE)
 
+cat("Connected OK.\n\n")
 
-# Insert a row
+# ---- init schema/table (idempotent) ----
+DBI::dbExecute(con, "CREATE SCHEMA IF NOT EXISTS core;")
+
 DBI::dbExecute(con, "
-  INSERT INTO core.runs_healthcheck (who, note)
-  VALUES ($1, $2);
-", params = list("connect_cloud", "db_healthcheck.qmd"))
+  CREATE TABLE IF NOT EXISTS core.runs_healthcheck (
+    id BIGSERIAL PRIMARY KEY,
+    ts_utc TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    who TEXT NOT NULL,
+    note TEXT
+  );
+")
 
-# Read last 5 rows
+# ---- write a row ----
+DBI::dbExecute(
+  con,
+  "INSERT INTO core.runs_healthcheck (who, note) VALUES ($1, $2);",
+  params = list("connect_cloud", "db_healthcheck.qmd")
+)
+
+# ---- read back ----
 rows <- DBI::dbGetQuery(con, "
   SELECT id, ts_utc, who, note
   FROM core.runs_healthcheck
@@ -92,7 +92,7 @@ rows <- DBI::dbGetQuery(con, "
   LIMIT 5;
 ")
 
-cat("Connected and wrote a row successfully.\n\n")
+cat("Wrote a row. Latest rows:\n\n")
 print(rows)
 
 ```
