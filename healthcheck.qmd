@@ -7,6 +7,8 @@ execute:
   message: false
   echo: false
 ---
+
+```{r}
 cat(
   "Posit Connect Cloud healthcheck\n",
   "Time (UTC): ", format(Sys.time(), tz = "UTC"), "\n\n",
@@ -20,5 +22,5 @@ for (v in env_vars) {
 }
 
 cat("\nOK\n")
-
+```
 
