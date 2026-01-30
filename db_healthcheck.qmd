@@ -19,8 +19,10 @@ if (db_url == "") stop("FINANCE_DB_URL is not set")
 
 `%||%` <- function(x, y) if (is.null(x) || identical(x, "")) y else x
 
-parts <- DBI::dbParseURL(db_url)
-sslmode <- parts$sslmode %||% "require"
+parts <- DBI::dbParseURI(db_url)
+
+q <- parts$query %||% list()
+sslmode <- q$sslmode %||% "require"
 
 con <- DBI::dbConnect(
   RPostgres::Postgres(),
