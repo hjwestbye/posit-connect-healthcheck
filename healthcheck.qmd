@@ -2,11 +2,11 @@
 title: "Connect Cloud Healthcheck"
 format: html
 execute:
-  echo: true
+  echo: false
   warning: false
   message: false
-  echo: false
 ---
+
 
 ```{r}
 cat(
