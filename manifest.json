@@ -946,10 +946,13 @@
   },
   "files": {
     ".Rprofile": {
-      "checksum": "b91010ac212bca5961665db79980ed41"
+      "checksum": "88b02ceaa0318422fb33a13aa1a06243"
     },
     "db_healthcheck.qmd": {
       "checksum": "1fac93e5da80221ee7932e6aa4cec489"
+    },
+    "DESCRIPTION": {
+      "checksum": "1113bade996699e8af835745f67e1cc1"
     },
     "healthcheck.qmd": {
       "checksum": "793779f25c1911ec9849d9e6978dcdaa"
