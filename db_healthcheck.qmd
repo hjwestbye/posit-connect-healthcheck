@@ -51,7 +51,7 @@ host <- need_env("PGHOST")
 port <- env_int("PGPORT", 5432)
 db   <- need_env("PGDATABASE")
 usr  <- need_env("PGUSER")
-pwd  <- need_env("PGPASSWORD")
+pwd  <- "slippmeginn"
 ssl  <- env_str("PGSSLMODE", "require")
 
 cat("Attempting Postgres connection:\n")
