@@ -17,12 +17,53 @@ library(RPostgres)
 db_url <- "postgresql://postgres:slippmeginn@db.wtkzwwhvwdtsusourfjh.supabase.co:5432/postgres"
 if (db_url == "") stop("FINANCE_DB_URL is not set")
 
-`%||%` <- function(x, y) if (is.null(x) || identical(x, "")) y else x
+# Minimal postgres URL parser:
+# postgres://user:pass@host:5432/dbname?sslmode=require
+parse_pg_url <- function(url) {
+  # split query string
+  parts <- strsplit(url, "\\?", fixed = FALSE)[[1]]
+  base <- parts[1]
+  query <- if (length(parts) > 1) parts[2] else ""
 
-parts <- DBI::dbParseURI(db_url)
+  # remove scheme
+  base <- sub("^postgresql?://", "", base)
 
-q <- parts$query %||% list()
-sslmode <- q$sslmode %||% "require"
+  # userinfo + host/db
+  at_split <- strsplit(base, "@", fixed = TRUE)[[1]]
+  if (length(at_split) != 2) stop("FINANCE_DB_URL must include userinfo@host, e.g. postgres://user:pass@host:5432/db")
+
+  userinfo <- at_split[1]
+  hostpart <- at_split[2]
+
+  # user:pass
+  up <- strsplit(userinfo, ":", fixed = TRUE)[[1]]
+  user <- up[1]
+  password <- if (length(up) >= 2) up[2] else ""
+
+  # host:port/dbname
+  hp_db <- strsplit(hostpart, "/", fixed = TRUE)[[1]]
+  if (length(hp_db) < 2) stop("FINANCE_DB_URL must include /dbname")
+  hostport <- hp_db[1]
+  dbname <- hp_db[2]
+
+  hp <- strsplit(hostport, ":", fixed = TRUE)[[1]]
+  host <- hp[1]
+  port <- if (length(hp) >= 2 && nzchar(hp[2])) as.integer(hp[2]) else 5432
+
+  # query params (only sslmode needed for now)
+  sslmode <- "require"
+  if (nzchar(query)) {
+    kvs <- strsplit(query, "&", fixed = TRUE)[[1]]
+    for (kv in kvs) {
+      kvp <- strsplit(kv, "=", fixed = TRUE)[[1]]
+      if (length(kvp) == 2 && kvp[1] == "sslmode") sslmode <- kvp[2]
+    }
+  }
+
+  list(host = host, port = port, dbname = dbname, user = user, password = password, sslmode = sslmode)
+}
+
+p <- parse_pg_url(db_url)
 
 con <- DBI::dbConnect(
   RPostgres::Postgres(),
